@@ -15,8 +15,6 @@ class parameters():
     M = 20000
     NStates = 3
     initState = 0
-    #method = "spin-pldm" # "SQC" or "PLDM" or "spin-pldm"
-    #sampling = "focused"
 
     windowtype = "square" # "square", "triangle", only for SQC
     adjustedgamma = "yes" # "yes", "no", only for SQC
