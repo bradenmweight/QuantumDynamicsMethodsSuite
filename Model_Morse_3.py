@@ -3,24 +3,24 @@ import time
 import numpy.linalg as LA
 
 class parameters():
-    NCPUS = 100
-    dtI = 0.2
-    NSteps = int(2895/dtI) #au = 70 fs # 41.350 a.u. / fs
-    NTraj = 10000
-    EStep = 100
+    NCPUS = 50
+    dtI = 2.0
+    NSteps = int(3500/dtI)
+    NTraj = 10 ** 4
+    EStep = 50
     dtE = dtI/EStep
     M = 20000
     NStates = 3
     initState = 0
-    method = "spin-pldm" # "SQC" or "PLDM" or "spin-pldm"
-    sampling = "focused"
+    #method = "spin-pldm" # "SQC" or "PLDM" or "spin-pldm"
+    #sampling = "focused"
 
-    windowtype = "n-triangle" # "Square", "N-Triangle", only for SQC
-    adjustedgamma = "yes" # "yes", "no", only for SQC
+    windowtype = "langer-correction" # "square", "triangle", "langer-correction" -- only for SQC
+    adjustedgamma = "no" # "yes", "no" -- only for SQC
 
-    dirName = "TRAJ_spin-PLDM_10000"
+    dirName = "TRAJ_SQC_LN"
 
-    fs_to_au = 41.341 # a.u./fs
+    NSkip = 20
 
 def Hel(x):
     #Models from: Coronado, Xing, and Miller, Chem. Phys. Let. 349, 5–6, 2001, 521-529
@@ -104,3 +104,7 @@ def initR():
     R = np.random.normal()*sigR + R0 # Set to deterministic trajectory *0
     P = np.random.normal()*sigP + P0
     return np.array([R]), np.array([P])
+
+
+
+
