@@ -9,11 +9,16 @@ SQC.py
   Windowing Schemes:                                 Square ("square") and Triangle ("triangle")
   State-specific Zero-point Energy (ZPE) Correction: True ("yes") or False ("no")
 
-Spin-mapping Partially Linearized Density Matrix (spin-PLDM) [Mannouch and Richardson]
+Spin-mapping Methods
 
-spin-PLDM.py
+spin-PLDM.py -- Partially Linearized Density Matrix (spin-PLDM) [Mannouch and Richardson, 2019]
 
-spin-LSC.py
+spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Richardson, 2020]
+
+Fewest Switches Surface Hopping
+
+  Vecloty Rescaling Schemes:                         Uniform energy-based rescaling ("energy")
+  Decoherence Corrections:                           Instantaneous Decoherence Correction ("IDC")
 
 
 
