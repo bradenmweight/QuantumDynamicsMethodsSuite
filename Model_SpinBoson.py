@@ -120,8 +120,9 @@ def initR():
     R0=0
     P0=0.0
     for d in range(ndof):
-        R[d] = R0 + sigq[d] * random.gauss(0,1)
-        P[d] = P0 + sigp[d] * random.gauss(0,1)
-   
+        #R[d] = R0 + sigq[d] * random.gauss(0,1)
+        #P[d] = P0 + sigp[d] * random.gauss(0,1)
+        R[d] =  random.gauss(R0,sigq[d])
+        P[d] =  random.gauss(R0,sigp[d])
     return R,P
 
