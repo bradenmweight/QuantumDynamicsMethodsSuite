@@ -71,8 +71,13 @@ def initR():
     alpha = 1.0
     sigR = 1.0/np.sqrt(2.0*alpha)
     sigP = np.sqrt(alpha/2.0)
+    
+    # Numpy gives bad random numbers
+    #R = np.random.normal()*sigR + R0
+    #P = np.random.normal()*sigP + P0
 
-    R = np.random.normal()*sigR + R0
-    P = np.random.normal()*sigP + P0
+    # Random module gives correct randoms for each trajectory
+    R = random.gauss(R0, sigR )
+    P = random.gauss(P0, sigP )
 
     return np.array([R]), np.array([P])
