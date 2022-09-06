@@ -1,26 +1,30 @@
-# QuantumDynamicsMethodsSuite
+### QuantumDynamicsMethodsSuite
 
 The methods housed in the files "QuantumDynamics_Methods.py" and "spin-PLDM" comprise an assortment of mixed quantum classical methods for electronic and nuclear propagation in the diabatic representation. The corresponding model files can be used with any method and should simply be imported in the method-code import block as needed. The model file contains all necessary parameters for running the model dynamics.
 
 Symmetric Quasi-Classical (SQC) Method [Miller and co-workers]
 
-SQC.py 
+# SQC.py 
 
   Windowing Schemes:                                 Square ("square") and Triangle ("triangle")
   State-specific Zero-point Energy (ZPE) Correction: True ("yes") or False ("no")
 
-Spin-mapping Methods
+## Spin-mapping Methods
 
-spin-PLDM.py -- Partially Linearized Density Matrix (spin-PLDM) [Mannouch and Richardson, 2019]
+# spin-PLDM.py -- Partially Linearized Density Matrix (spin-PLDM) [Mannouch and Richardson, 2019]
 
-spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Richardson, 2020]
+# spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Richardson, 2020]
 
-Fewest Switches Surface Hopping
+# Fewest Switches Surface Hopping
 
   rescale_type: str -- 'energy', 'momentum'
+
   decoherece_type: str -- "None", "IDC", "EDC"
+  
   EDC_PARAM: float -- 0.1 is optimal, Only applies for EDC decoherence
+  
   AS_POP_INCREASE: int -- 0 or 1 -- 1 is better 0: will perform hop if active state population is increasing. 1: will reject hopping
+  
   SWAP_COEFFS_HOP = int -- 0 or 1 -- 0 is better # 0: Never swap coefficients at hop, 1: Swap old and new active state coefficients at accepted hops
 
 
