@@ -17,9 +17,11 @@ spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Ric
 
 Fewest Switches Surface Hopping
 
-  Vecloty Rescaling Schemes:                         Uniform energy-based rescaling ("energy")
-  Decoherence Corrections:                           Instantaneous Decoherence Correction ("IDC")
-
+  rescale_type: str -- 'energy', 'momentum'
+  decoherece_type: str -- "None", "IDC", "EDC"
+  EDC_PARAM: float -- 0.1 is optimal, Only applies for EDC decoherence
+  AS_POP_INCREASE: int -- 0 or 1 -- 1 is better 0: will perform hop if active state population is increasing. 1: will reject hopping
+  SWAP_COEFFS_HOP = int -- 0 or 1 -- 0 is better # 0: Never swap coefficients at hop, 1: Swap old and new active state coefficients at accepted hops
 
 
 
