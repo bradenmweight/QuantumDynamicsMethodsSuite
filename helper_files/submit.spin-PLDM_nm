@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH -p exciton -A exciton
+##SBATCH -p standard
+#SBATCH -J spin-PLDM
+#SBATCH -o output.slurm
+#SBATCH --mem=30GB
+#SBATCH -t 5-00:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=12
+
+python3 spin-PLDM.py $1 $2 # For only spin-PLDM
+
+
+
+
