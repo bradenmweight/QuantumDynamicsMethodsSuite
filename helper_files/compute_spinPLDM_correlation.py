@@ -1,18 +1,25 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import subprocess as sp
+import os
 
 NStates = 2    # Number of Electronic States
 NSteps  = 1200 # Number of "SAVED" Nuclear Time Steps -- NStepsReal / NSkip
-NTraj   = 1000 # Number of Trajectories
+NTraj   = 10**5 # Number of Trajectories
 dtI     = 1.0 # a.u. # (Nuclear Step, dtI) * NSkip
 
 time = np.zeros(( NSteps, 2 )) # Convert to fs
 wF = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Forward Mapping Kernel
 wB = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Backward Mapping Kernel
 
+print(f"\tMemory size of one numpy array: ({round(wF.size * wF.itemsize * 10 ** -6,2)} MB,{round(wF.size * wF.itemsize * 10 ** -9,2)} GB)" )
+
+
 OUTER_DIR = "TRAJ_spin-PLDM"
 IMAGE_DIR = f"{OUTER_DIR}/data_images_correlations/"
+if ( not os.path.isdir(OUTER_DIR) ):
+    print( f"{OUTER_DIR} not found. Run above 'OUTER_DIR'." )
+    exit()
 sp.call(f"mkdir -p {IMAGE_DIR}",shell=True)
 
 
@@ -45,7 +52,7 @@ def read_kernels( typeDEN="ALL" ):
 
     return wF, wB, np.real(time)
 
-def get_CAB( wF, wB, A, B ):
+def get_CAB( wF, wB, A, B, return_Partials = False ):
 
     # Get matrix multiplication for correlation function
     AwBw = np.einsum( "ab,NMTtbc,cd,NMTtde->NMTtae",  A, wB, B, wF )    
@@ -59,7 +66,10 @@ def get_CAB( wF, wB, A, B ):
     ### ADD ALL FOCUSED INITIAL CONDITIONS ###         
     CAB = np.einsum( "NMt->t", TrAwBw_ave[:,:,:] )
 
-    return CAB
+    if ( return_Partials ):
+        return CAB, TrAwBw_ave
+    else:
+        return CAB
 
 def ABS_SPECTRA(rho0,A,B):
     # R1 = (1) - (2)
@@ -181,7 +191,7 @@ def get_POPULATION_from_initPOP( wF, wB, init = 1, track = 1 ): # Track which el
 
     return np.real(CAB)
 
-def get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [1,1] ): # Track which element
+def get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [1,1], return_Partials=False ): # Track which element
 
 
     rho0 = np.zeros(( NStates,NStates ), dtype=complex)
@@ -194,11 +204,21 @@ def get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [1,1] ): # Track which
     print( "Population: A =\n", np.real(A) )
     print( "Coherence:  B =\n", np.real(B) )
 
-    CAB = get_CAB( wF, wB, A, B )
+    if ( return_Partials ):
+        CAB, TrAwBw_ave = get_CAB( wF, wB, A, B, return_Partials=True )
+        for j in range( NStates ):
+            for k in range( NStates ):
+                np.savetxt(f"{IMAGE_DIR}/P_init{init}_track{track[0]}{track[1]}_NTraj{NTraj}_P{j}{k}.dat", np.c_[np.real(TrAwBw_ave[j,k]), np.imag(TrAwBw_ave[j,k]) ] )
+
+    else:
+        CAB = get_CAB( wF, wB, A, B )
 
     np.savetxt(f"{IMAGE_DIR}/P_init{init}_track{track[0]}{track[1]}_NTraj{NTraj}.dat", np.c_[np.real(CAB), np.imag(CAB) ] )
 
-    return CAB
+    if ( return_Partials ):
+        return CAB, TrAwBw_ave
+    else:
+        return CAB
 
 
 ################# START MAIN PROGRAM #################
@@ -208,14 +228,15 @@ def main():
     wF, wB, time = read_kernels()
 
     rho = np.zeros(( NStates, NStates, NSteps ), dtype=complex)
+    rho_partial = np.zeros(( NStates, NStates, NStates, NStates, NSteps ), dtype=complex)
     for state_j in range( NStates ):
         for state_k in range( NStates ):
-            rho[state_j,state_k,:] = get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [state_j,state_k] ) # Choose state to intialize and track
+            rho[state_j,state_k,:], rho_partial[:,:,state_j,state_k,:] = get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [state_j,state_k], return_Partials=True ) # Choose state to intialize and track
             if ( state_j == state_k ):
-                plt.plot( time[:,0], np.real(rho[state_j,state_k]), label=r"$\rho$"+f"{state_j}{state_k}" )
+                plt.plot( time[:,0], np.real(rho[state_j,state_k]), linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k}" )
             else:
-                plt.plot( time[:,0], np.real(rho[state_j,state_k]), label=r"$\rho$"+f"{state_j}{state_k} (RE)" )
-                plt.plot( time[:,0], np.imag(rho[state_j,state_k]), label=r"$\rho$"+f"{state_j}{state_k} (IM)" )
+                plt.plot( time[:,0], np.real(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (RE)" )
+                plt.plot( time[:,0], np.imag(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (IM)" )
     
     plt.legend()
     plt.xlim(0)
@@ -224,8 +245,33 @@ def main():
     plt.ylabel("Density Matrix Elements",fontsize=15)
     plt.title(f"Tully #1 (NTraj = {NTraj})",fontsize=15)
     plt.tight_layout()
-    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}.jpg" )
+    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}.jpg", dpi=400 )
+    #plt.clf()
+
+    # Plot decomposed partial contributions
+    for P1 in range( NStates ): 
+        for P2 in range( NStates ): 
+            for state_j in range( NStates ):
+                for state_k in range( state_j,NStates ):
+                    if ( state_j == state_k ):
+                        tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
+                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2})" )
+                    else:
+                        tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
+                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (RE)" )
+                        tmp = np.imag(rho_partial[P1,P2,state_j,state_k,:])
+                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (IM)" )
+    
+    plt.legend()
+    plt.xlim(0)
+    plt.ylim(-0.4,1.05)
+    plt.xlabel("Time (a.u.)",fontsize=15)
+    plt.ylabel("Density Matrix Elements",fontsize=15)
+    plt.title(f"Tully #1 (NTraj = {NTraj})",fontsize=15)
+    plt.tight_layout()
+    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}_PjkDecomposed.jpg", dpi=400 )
     plt.clf()
+
 
 
 if ( __name__ == "__main__" ):
