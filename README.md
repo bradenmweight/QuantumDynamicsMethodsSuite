@@ -1,19 +1,21 @@
 ### QuantumDynamicsMethodsSuite
 
-The methods housed in the files "QuantumDynamics_Methods.py" and "spin-PLDM" comprise an assortment of mixed quantum classical methods for electronic and nuclear propagation in the diabatic representation. The corresponding model files can be used with any method and should simply be imported in the method-code import block as needed. The model file contains all necessary parameters for running the model dynamics.
+The methods housed in this repository comprise an assortment of mixed quantum classical (MQC) methods for electronic and nuclear propagation. The corresponding model files can be used with any method and should simply be imported in the method's code import block as needed. The model file contains all necessary parameters for running the model dynamics.
 
 Symmetric Quasi-Classical (SQC) Method [Miller and co-workers]
 
 # SQC.py 
 
-  Windowing Schemes:                                 Square ("square") and Triangle ("triangle")
-  State-specific Zero-point Energy (ZPE) Correction: True ("yes") or False ("no")
+  Windowing Schemes:                                      Square ("square") and Triangle ("triangle")
+  State-specific Zero-point Energy (ZPE) Correction:      True ("yes") or False ("no")
 
 ## Spin-mapping Methods
 
 # spin-PLDM.py -- Partially Linearized Density Matrix (spin-PLDM) [Mannouch and Richardson, 2019]
 
-# spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Richardson, 2020]
+# spin-LSC.py  -- Partially Linearized Density Matrix (spin-PLDM) [Runeson and Richardson, 2019]
+
+# GDTWA.py     -- Generalized Discrete Truncated Wigner Approximation [Lang et al., J. Chem. Phys. 155, 024111 (2021); https://doi.org/10.1063/5.0054696]
 
 # Fewest Switches Surface Hopping
 
@@ -31,8 +33,9 @@ Symmetric Quasi-Classical (SQC) Method [Miller and co-workers]
 
 Future To-do's:
 
-1. Create main.py to monitor and handle all methods based upon a parameter file for ease of use.
+1. Implement quasi-diabatic propagation scheme to each method to exemplify the utility in on-the-fly calculations
 
-2. Implement quasi-diabatic propagation scheme to each method to exemplify the utility in on-the-fly calculations
+
+
 
 For any questions or concerns, please email bweight@ur.rochester.edu
