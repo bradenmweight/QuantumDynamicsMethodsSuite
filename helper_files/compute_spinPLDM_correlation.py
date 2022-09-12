@@ -2,25 +2,45 @@ import numpy as np
 from matplotlib import pyplot as plt
 import subprocess as sp
 import os
+import multiprocessing as mp
 
-NStates = 2    # Number of Electronic States
-NSteps  = 1200 # Number of "SAVED" Nuclear Time Steps -- NStepsReal / NSkip
-NTraj   = 10**5 # Number of Trajectories
-dtI     = 1.0 # a.u. # (Nuclear Step, dtI) * NSkip
+def get_globals():
+    global NStates, NSteps, NTraj, dtI, NCPUS
+    global do_Partial_Analysis, do_Pop_Only, do_Parallel_Read
+    global typeDEN, COLUMN
+    global time, wF, wB
+    global OUTER_DIR, IMAGE_DIR
 
-time = np.zeros(( NSteps, 2 )) # Convert to fs
-wF = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Forward Mapping Kernel
-wB = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Backward Mapping Kernel
+    NStates = 7    # Number of Electronic States
+    NSteps  = 1000 # Number of "SAVED" Nuclear Time Steps -- NStepsReal / NSkip
+    NTraj   = 10 # Number of Trajectories
+    dtI     = 41.341/2*10 # 1.0 # a.u. # (Nuclear Step, dtI) * NSkip , Only used for FFT in abs. spec.
 
-print(f"\tMemory size of one numpy array: ({round(wF.size * wF.itemsize * 10 ** -6,2)} MB,{round(wF.size * wF.itemsize * 10 ** -9,2)} GB)" )
+
+    do_Partial_Analysis = False
+    do_Pop_Only = True
+    do_Parallel_Read = True
+    NCPUS = 12
+
+    typeDEN = "ALL" # "ALL", "UPT", "DIAG", "COLUMN"
+    COLUMN = 0 # Choose initial state. Recall 0 = G.S.
 
 
-OUTER_DIR = "TRAJ_spin-PLDM"
-IMAGE_DIR = f"{OUTER_DIR}/data_images_correlations/"
-if ( not os.path.isdir(OUTER_DIR) ):
-    print( f"{OUTER_DIR} not found. Run above 'OUTER_DIR'." )
-    exit()
-sp.call(f"mkdir -p {IMAGE_DIR}",shell=True)
+    time = np.zeros(( NSteps, 2 )) # Convert to fs
+    wF = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Forward Mapping Kernel
+    wB = np.zeros((NStates,NStates,NTraj,NSteps,NStates,NStates),dtype=complex) # Backward Mapping Kernel
+
+    print(f"\tMemory size of one numpy array: ({round(wF.size * wF.itemsize * 10 ** -6,2)} MB,{round(wF.size * wF.itemsize * 10 ** -9,2)} GB)" )
+
+
+    OUTER_DIR = "TRAJ_spin-PLDM"
+    IMAGE_DIR = f"{OUTER_DIR}/data_images_correlations/"
+    if ( not os.path.isdir(OUTER_DIR) ):
+        print( f"{OUTER_DIR} not found. Run above 'OUTER_DIR'." )
+        exit()
+    sp.call(f"mkdir -p {IMAGE_DIR}",shell=True)
+
+    return wF, wB
 
 
 def read_kernels( typeDEN="ALL" ):
@@ -44,13 +64,43 @@ def read_kernels( typeDEN="ALL" ):
             count = 0
             for j in range( NStates ):
                 for k in range( NStates ):
-                    wF[n,m,traj,:,j,k] = tmpF[:, 2+count]
-                    wB[n,m,traj,:,j,k] = tmpB[:, 2+count]
+                    wF[n,m,traj,:,j,k] = tmpF[:NSteps, 2+count]
+                    wB[n,m,traj,:,j,k] = tmpB[:NSteps, 2+count]
                     count += 1
 
             if ( traj == 0 ): time = tmpF[:NSteps,:2]
 
-    return wF, wB, np.real(time)
+    return wF, wB
+
+def read_kernel_parallel( nm ):
+
+    n,m = nm
+
+    wFnm = np.zeros((NTraj,NSteps,NStates,NStates),dtype=complex)
+    wBnm = np.zeros((NTraj,NSteps,NStates,NStates),dtype=complex)
+
+    print(f"Working on element = ({n}, {m})")
+    for traj in range( NTraj ):
+
+        ### READ IN MAPPING KERNELS FOR ALL TRAJECTORIES AND INITIALLY FOCUSED STATES ###
+        #print(f"Working on TRAJ = {traj}")
+        tmpF = np.loadtxt( f"{OUTER_DIR}/Partial__{n}{m}/traj-{traj}/mapping_F.dat", dtype=complex )
+        tmpB = np.loadtxt( f"{OUTER_DIR}/Partial__{n}{m}/traj-{traj}/mapping_B.dat", dtype=complex )
+        #print( tmpF[0,:] )
+        count = 0
+        for j in range( NStates ):
+            for k in range( NStates ):
+                wFnm[traj,:,j,k] = tmpF[:NSteps, 2+count]
+                wBnm[traj,:,j,k] = tmpB[:NSteps, 2+count]
+                count += 1
+
+    return wFnm, wBnm
+
+def get_time():
+
+    t = np.loadtxt( f"{OUTER_DIR}/Partial__00/traj-0/mapping_F.dat", dtype=complex )[:NSteps,:2]
+
+    return np.real( t )
 
 def get_CAB( wF, wB, A, B, return_Partials = False ):
 
@@ -225,19 +275,70 @@ def get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [1,1], return_Partials
 
 def main():
 
-    wF, wB, time = read_kernels()
+    wF, wB = get_globals()
 
+    if ( do_Parallel_Read == True ):
+        with mp.Pool(processes=NCPUS) as pool:
+            if ( typeDEN == "ALL" ):
+                nms = [ [n,m] for n in range( NStates ) for m in range( NStates ) ] 
+                tmp = pool.map(read_kernel_parallel,nms)
+                for count,(n,m) in enumerate(nms):
+                    wF[n,m] = np.array( tmp[count][0] )
+                    wB[n,m] = np.array( tmp[count][1] )
+            elif( typeDEN == "UPT" ):
+                print("Approximating inital conditions to upper triangle. Assumed Hermitian.")
+                nms = [ [n,m] for n in range( NStates ) for m in range( n, NStates ) ] 
+                tmp = pool.map(read_kernel_parallel,nms)
+                for count,(n,m) in enumerate(nms):
+                    wF[n,m] = np.array( tmp[count][0] )
+                    wF[m,n] = np.conjugate( np.array( tmp[count][0] ) )
+                    wB[n,m] = np.array( tmp[count][1] )
+                    wB[m,n] = np.conjugate( np.array( tmp[count][1] ) )
+            elif( typeDEN == "DIAG" ):
+                print("!!! WARNING !!! Approximating inital conditions to diagonal. Coherences are zeros. Probably bad.")
+                nms = [ [n,n] for n in range( NStates ) ] 
+                tmp = pool.map(read_kernel_parallel,nms)
+                for count,(n,m) in enumerate(nms):
+                    wF[n,m] = np.array( tmp[count][0] )
+                    wB[n,m] = np.array( tmp[count][1] )
+            elif( typeDEN == "COLUMN" ):
+                print(f"!!! WARNING !!! Approximating inital conditions to single column. All else is zero. Choose column to be initial state. Column = {column}. Assuming Hermitian.")
+                nms = [ [column,n] for n in range( NStates ) ] 
+                tmp = pool.map(read_kernel_parallel,nms)
+                for count,(n,m) in enumerate(nms):
+                    wF[n,m] = np.array( tmp[count][0] )
+                    wF[m,n] = np.conjugate( np.array( tmp[count][0] ) )
+                    wB[n,m] = np.array( tmp[count][1] )
+                    wB[m,n] = np.conjugate( np.array( tmp[count][1] ) )
+
+    else:
+        wF, wB = read_kernels()
+
+    time = get_time()
     rho = np.zeros(( NStates, NStates, NSteps ), dtype=complex)
-    rho_partial = np.zeros(( NStates, NStates, NStates, NStates, NSteps ), dtype=complex)
-    for state_j in range( NStates ):
-        for state_k in range( NStates ):
-            rho[state_j,state_k,:], rho_partial[:,:,state_j,state_k,:] = get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [state_j,state_k], return_Partials=True ) # Choose state to intialize and track
-            if ( state_j == state_k ):
-                plt.plot( time[:,0], np.real(rho[state_j,state_k]), linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k}" )
-            else:
-                plt.plot( time[:,0], np.real(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (RE)" )
-                plt.plot( time[:,0], np.imag(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (IM)" )
-    
+
+    if ( do_Pop_Only == True ):
+        # Plot all population elements
+        for state_j in range( NStates ):
+            rho[state_j,state_j,:] = get_COHERENCE_FROM_initPOP( wF, wB, init = 0, track = [state_j,state_j], return_Partials=False ) # Choose state to intialize and track
+            plt.plot( time[:,0], np.real(rho[state_j,state_j]), linewidth=3, alpha=0.6, label=f"P{state_j+1}" )
+
+    else:
+        rho_partial = np.zeros(( NStates, NStates, NStates, NStates, NSteps ), dtype=complex)
+        # Plot all density matrix elements
+        for state_j in range( NStates ):
+            for state_k in range( NStates ):
+                rho[state_j,state_k,:], rho_partial[:,:,state_j,state_k,:] = get_COHERENCE_FROM_initPOP( wF, wB, init = 1, track = [state_j,state_k], return_Partials=True ) # Choose state to intialize and track
+                if ( state_j == state_k ):
+                    plt.plot( time[:,0], np.real(rho[state_j,state_k]), linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k}" )
+                else:
+                    plt.plot( time[:,0], np.real(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (RE)" )
+                    plt.plot( time[:,0], np.imag(rho[state_j,state_k]),linewidth=3, alpha=0.6, label=r"$\rho$"+f"{state_j}{state_k} (IM)" )
+
+
+
+
+
     plt.legend()
     plt.xlim(0)
     plt.ylim(-0.4,1.05)
@@ -245,32 +346,34 @@ def main():
     plt.ylabel("Density Matrix Elements",fontsize=15)
     plt.title(f"Tully #1 (NTraj = {NTraj})",fontsize=15)
     plt.tight_layout()
-    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}.jpg", dpi=400 )
+    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}_TypeDEN{typeDEN}.jpg", dpi=400 )
     #plt.clf()
 
-    # Plot decomposed partial contributions
-    for P1 in range( NStates ): 
-        for P2 in range( NStates ): 
-            for state_j in range( NStates ):
-                for state_k in range( state_j,NStates ):
-                    if ( state_j == state_k ):
-                        tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
-                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2})" )
-                    else:
-                        tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
-                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (RE)" )
-                        tmp = np.imag(rho_partial[P1,P2,state_j,state_k,:])
-                        plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (IM)" )
-    
-    plt.legend()
-    plt.xlim(0)
-    plt.ylim(-0.4,1.05)
-    plt.xlabel("Time (a.u.)",fontsize=15)
-    plt.ylabel("Density Matrix Elements",fontsize=15)
-    plt.title(f"Tully #1 (NTraj = {NTraj})",fontsize=15)
-    plt.tight_layout()
-    plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}_PjkDecomposed.jpg", dpi=400 )
-    plt.clf()
+    if ( do_Partial_Analysis ):
+
+        # Plot decomposed partial contributions
+        for P1 in range( NStates ): 
+            for P2 in range( NStates ): 
+                for state_j in range( NStates ):
+                    for state_k in range( state_j,NStates ):
+                        if ( state_j == state_k ):
+                            tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
+                            plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2})" )
+                        else:
+                            tmp = np.real(rho_partial[P1,P2,state_j,state_k,:])
+                            plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (RE)" )
+                            tmp = np.imag(rho_partial[P1,P2,state_j,state_k,:])
+                            plt.plot( time[:,0], tmp, "--",linewidth=2, label=f"{state_j}{state_k} (P{P1}{P2}) (IM)" )
+        
+        plt.legend()
+        plt.xlim(0)
+        plt.ylim(-0.4,1.05)
+        plt.xlabel("Time (a.u.)",fontsize=15)
+        plt.ylabel("Density Matrix Elements",fontsize=15)
+        plt.title(f"Tully #1 (NTraj = {NTraj})",fontsize=15)
+        plt.tight_layout()
+        plt.savefig( f"{IMAGE_DIR}/P_init1_trackALL_NTraj{NTraj}_TypeDEN{typeDEN}_PjkDecomposed.jpg", dpi=400 )
+        plt.clf()
 
 
 

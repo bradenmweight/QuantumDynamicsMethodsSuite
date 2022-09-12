@@ -1,0 +1,15 @@
+#!/bin/bash
+##SBATCH -p standard
+#SBATCH -p exciton -A exciton
+##SBATCH -p action
+#SBATCH -J GDTWA
+#SBATCH -o output.slurm
+#SBATCH --mem=30GB
+#SBATCH -t 2-00:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=12
+
+python3 GDTWA.py # For only spin-PLDM
+
+
+
