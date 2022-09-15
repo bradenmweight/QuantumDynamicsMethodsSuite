@@ -9,7 +9,7 @@ class parameters():
     NTraj = 10000
     EStep = 50
     dtE = dtI/EStep
-    NSkip = 0.1 # Plot every {} a.u.
+    NSkip = 1 # Plot every {} steps
 
     M = 1 # Set to "1" for spin-boson
     NStates = 2
