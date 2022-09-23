@@ -13,7 +13,7 @@ def getGlobalParams():
     global dtE, dtI, NSteps, NTraj, NStates, M
     global NCPUS, initState, dirName
     global fs_to_au, NSkip, NDOF
-    global rescale_type, decoherece_type
+    global rescale_type, decoherece_type, SWAP_COEFFS_HOP
     global Diabatic_Density_Type, EDC_PARAM, AS_POP_INCREASE
     dtE = model.parameters.dtE
     dtI = model.parameters.dtI
@@ -27,6 +27,7 @@ def getGlobalParams():
     rescale_type = model.parameters.rescale_type
     NSkip = model.parameters.NSkip
     NDOF = model.parameters.NDOF
+    SWAP_COEFFS_HOP = model.parameters.SWAP_COEFFS_HOP
     decoherece_type = model.parameters.decoherece_type
     Diabatic_Density_Type = model.parameters.Diabatic_Density_Type
     EDC_PARAM = model.parameters.EDC_PARAM
@@ -491,15 +492,15 @@ def evaluate_hop( active_state, hop_data, M, V, Ead, deriv_coup, z_ad ):
                 V[:] -= scale_factor * deriv_coup[start_state,end_state,:] / M[:]
 
 
-
         # DEPING SUGGESTS TO TURN OFF STATE SWAPPING
         # Rearrange states based on hop
+        if ( SWAP_COEFFS_HOP == 1 ):
+            tmp = np.copy( z_ad[start_state] )
+            z_ad[start_state] = z_ad[end_state]
+            z_ad[end_state] = tmp
+
         active_state = end_state
-        """
-        tmp = np.copy( z_ad[start_state] )
-        z_ad[start_state] = z_ad[end_state]
-        z_ad[end_state] = tmp
-        """
+
 
     return M*V, z_ad, active_state
 
@@ -554,11 +555,8 @@ def VelVerF(R, P, z_ad, Uad_old, active_state, RFile, VFile, HelFile, energyFile
     F1 = Force(dHel_ad, R, z_ad, active_state, step, dHel0, forceFile, writeForce=True)
 
     P += 0.5000 * F1 * dtI # Half-step velocity
-    ##########P = np.array([ 10000 ])
 
     R += P / M * dtI # Full Step Position
-    #R = np.array([2.100 + (step+1) * 0.0025])
-    #R = np.array([ 3.0 ])
 
     Hel = model.Hel(R) # Electronic Structure
     Ead, Uad = np.linalg.eigh(Hel) # Return adiabatic states and transformation matrices
@@ -591,7 +589,6 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
     activeStateFile, energyFileAd, energyFileDia, densityFiles, InitCondsFile, RFile, VFile, HelFile, probFile, randFile, NACRFile, NACTFile, forceFile = initFiles(n) # Makes file objects
 
     R,P = model.initR() # Initialize nuclear DOF
-    #R,P = np.array([2.1]), np.array([0.0])
 
     z, active_state = initCoeffs(InitCondsFile)
     Uad = np.identity( NStates )
