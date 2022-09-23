@@ -70,6 +70,7 @@ def dHel(R):
     else:
         dHel[0,0,0] = A * B * np.exp( B*R )
 
+    dHel[1,1,0] = -dHel[0,0,0]
     dHel[0,1,0] = -2 * C * D * R * np.exp(-D*R**2)
     dHel[1,0,0] = dHel[0,1,0]
 
