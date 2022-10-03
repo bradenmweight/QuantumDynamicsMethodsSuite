@@ -11,7 +11,7 @@ from numba import jit
 def getGlobalParams():
     global dtE, dtI, NSteps, NTraj, NStates, M, windowtype
     global adjustedgamma, NCPUS, initState, dirName, method
-    global fs_to_au, sampling, topDir, NSkip
+    global fs_to_au, sampling, topDir, NSkip, save_kernels, save_ABS
     dtE = model.parameters.dtE
     dtI = model.parameters.dtI
     NSteps = model.parameters.NSteps
@@ -28,6 +28,8 @@ def getGlobalParams():
     #method = model.parameters.method.lower()
     fs_to_au = 41.341 # a.u./fs
     NSkip = model.parameters.NSkip
+    save_kernels = model.parameters.save_kernels
+    save_ABS = model.parameters.save_ABS
 
 def cleanMainDir():
     #if ( os.path.exists(dirName) ):
@@ -332,8 +334,10 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
             #writeHel(Hel,HelFile)
             #writeHad(Hel,HadFile)
             writeDensity(densityFile,coherenceFile,z,step,z0,Ugam)
-            #writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
-            writeABS(ABS_FILE,z,step,z0,Ugam)
+            if ( save_kernels == True ):
+                writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
+            if ( save_ABS = True ):
+                writeABS(ABS_FILE,z,step,z0,Ugam)
         R, P, z, Hel = VelVerF(R, P, z, RFile, HelFile)
         Ugam = update_Gamma( Ugam, Hel )
         
