@@ -1,0 +1,19 @@
+#!/bin/bash
+##SBATCH -p exciton -A exciton
+##SBATCH -p action
+#SBATCH -p standard
+#SBATCH -J FMO_AVE
+#SBATCH -o output.slurm
+#SBATCH --mem=20GB
+#SBATCH -t 5-00:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=36
+
+export OMP_NUM_THREADS=36
+export MKL_NUM_THREADS=1
+
+python3 get_spin-PLDM_POP_average.py
+
+
+
+

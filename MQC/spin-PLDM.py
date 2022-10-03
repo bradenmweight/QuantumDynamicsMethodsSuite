@@ -1,7 +1,7 @@
 import numpy as np
 import multiprocessing as mp
 import time, os, sys
-import Model_Tully_1 as model
+import model_coupled_dimer as model
 import numpy.linalg as LA
 import subprocess as sp
 import random
@@ -10,7 +10,7 @@ from numba import jit
 
 def getGlobalParams():
     global dtE, dtI, NSteps, NTraj, NStates, M, windowtype
-    global adjustedgamma, NCPUS, initstate, dirName, method
+    global adjustedgamma, NCPUS, initState, dirName, method
     global fs_to_au, sampling, topDir, NSkip
     dtE = model.parameters.dtE
     dtI = model.parameters.dtI
@@ -22,7 +22,7 @@ def getGlobalParams():
     #windowtype = model.parameters.windowtype.lower()
     #adjustedgamma = model.parameters.adjustedgamma.lower()
     NCPUS = model.parameters.NCPUS
-    initstate = model.parameters.initState # Not needed but good for checking post-processing routine
+    initState = model.parameters.initState # Not needed but good for checking post-processing routine
     dirName = model.parameters.dirName  + "/Partial__" + sys.argv[1] + sys.argv[2]
     topDir = model.parameters.dirName
     #method = model.parameters.method.lower()
@@ -41,7 +41,7 @@ def cleanDir(n):
 
 def initFiles(n):
 
-    densityFile = open(dirName+"/traj-" + str(n) + "/density.dat","w")
+    densityFile = open(dirName+"/traj-" + str(n) + "/population.dat","w")
     coherenceFile = open(dirName+"/traj-" + str(n) + "/coherence.dat","w")
     InitCondsFile = open(dirName+"/traj-" + str(n) + "/initconds.dat","w")
     RFile = open(dirName+"/traj-" + str(n) + "/RFile.dat","w")
@@ -50,13 +50,17 @@ def initFiles(n):
     mappingFile_F = open(dirName+"/traj-" + str(n) + "/mapping_F.dat","a")
     mappingFile_B = open(dirName+"/traj-" + str(n) + "/mapping_B.dat","a")
     gamma_mat_File = open(dirName+"/traj-" + str(n) + "/gamma_mat.dat","a")
-    return densityFile, InitCondsFile, RFile, HelFile, HadFile, coherenceFile, mappingFile_F, mappingFile_B, gamma_mat_File
+    ABS_FILE = open(dirName+"/traj-" + str(n) + "/J_ABS.dat","a")
+    return densityFile, InitCondsFile, RFile, HelFile, HadFile, coherenceFile, mappingFile_F, mappingFile_B, gamma_mat_File, ABS_FILE
 
-def closeFiles(densityFile, InitCondsFile, RFile, HelFile, coherenceFile):
+def closeFiles(densityFile, InitCondsFile, RFile, HelFile, coherenceFile, mappingFile_F, mappingFile_B, ABS_FILE):
     densityFile.close()    
     InitCondsFile.close()
     RFile.close()
     HelFile.close()
+    mappingFile_F.close()
+    mappingFile_B.close()
+    ABS_FILE.close()
     coherenceFile.close()
 
 def makeArrays():
@@ -79,35 +83,73 @@ def update_Gamma( Ugam, Hel ):
 
 def writeDensity(densityFile,coherenceFile,z,i,z0,Ugam):
 
+    outArrayPOP = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
+    outArrayCOH = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
+
     zF0 = z0[0] # Complex 1D array
     zB0 = z0[1] # Complex 1D array
 
     zF = z[0] # Complex 1D array
     zB = z[1] # Complex 1D array
 
-    gamEvolved = gw * Ugam
+    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
+    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
+    wB = np.einsum( "ij->ji", wB )
+    wB = np.conjugate( wB )
 
-    if ( i % NSkip == 0 ):
-        rho = np.zeros((NStates,NStates),dtype=complex)
-        for n in range( NStates ):
-            for m in range( NStates ):
-                rho[n,m] = 0.25 * ( zB[n].conjugate() * zB0[initstate] - gamEvolved[ n,initstate ].conjugate() ) * ( zF[m] * zF0[initstate].conjugate() - gamEvolved[ m,initstate ] )
+    POP = np.zeros(( NStates )) # Track population given initial state excitation
+    A = np.zeros(( NStates, NStates ), dtype=complex) # Track population given initial state excitation
+    A[initState,initState] = 1.0 + 0.0j
+    for j in range( NStates ):
+        B = np.zeros(( NStates, NStates ), dtype=complex)
+        B[j,j] = 1.0 + 0.0j
+        AwBw   = np.einsum( "ab,bc,cd,de->ae",  A, wB, B, wF )
+        POP[j] = np.real( np.einsum( "aa->",  AwBw ) )
+
+        outArrayPOP.append( POP[j] )
+
+    densityFile.write( "\t".join(map("{:1.5f}".format,outArrayPOP)) + "\n")
 
 
-        outArrayPOP = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
-        outArrayCOH = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
+def writeABS(ABS_FILE,z,i,z0,Ugam):
 
-        sumPOP = 0
-        for n in range(len(zF)):
-            outArrayPOP.append( np.real(rho[n,n]) )
-            for m in range(n+1,len(zF)):
-                outArrayCOH.append( np.real( rho[n,m] ) )
-                outArrayCOH.append( np.imag( rho[n,m] ) )
+    outArrayABS = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
 
-        densityFile.write( "\t".join(map(str,outArrayPOP)) + "\n")
-        coherenceFile.write( "\t".join(map(str,outArrayCOH)) + "\n")
+    zF0 = z0[0] # Complex 1D array
+    zB0 = z0[1] # Complex 1D array
 
-        #print ( "\n\t(Time, POP) :", " ".join(map(str,outArrayPOP[1:])) )
+    zF = z[0] # Complex 1D array
+    zB = z[1] # Complex 1D array
+
+    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
+    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
+    wB = np.einsum( "ij->ji", wB )
+    wB = np.conjugate( wB )
+
+    # Define dipole operator
+    MU_p = np.zeros(( NStates, NStates ))
+    MU_m = np.zeros(( NStates, NStates ))
+    mu1 = -0.2
+    mu2 = 1.0
+    MU_m[0,1] = mu2
+    MU_m[0,2] = mu1
+    MU_m[1,3] = mu1
+    MU_m[2,3] = mu2
+    MU_p[1,0] = mu2
+    MU_p[2,0] = mu1
+    MU_p[3,1] = mu1
+    MU_p[3,2] = mu2
+
+
+    A = np.zeros(( NStates, NStates ), dtype=complex) # Track population given initial state excitation
+    A[0,0] = 1.0 + 0.0j
+
+    AwBw   = np.einsum( "ab,bc,cd,de,ef->af",  A, MU_m, wB, MU_p, wF ) # Which is correct ?
+    J_ABS = np.einsum( "aa->",  AwBw )
+
+    outArrayABS.append( J_ABS )
+
+    ABS_FILE.write( "\t".join(map("{:1.5f}".format,outArrayABS)) + "\n")
 
 def writeKernel(z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File):
 
@@ -117,18 +159,18 @@ def writeKernel(z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File)
     zF0 = z0[0] * 1.0
     zB0 = z0[1] * 1.0
 
-    w   = 0.5 * ( np.einsum("i,j", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
-    wp  = 0.5 * ( np.einsum("i,j", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
-    wp = np.einsum( "ji", wp )
-    wp = np.conjugate( wp )
+    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
+    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
+    wB = np.einsum( "ij->ji", wB )
+    wB = np.conjugate( wB )
 
     outF = [ round ( step * dtI ,5), round ( step * dtI / fs_to_au,5 ) ]
     outB = [ round ( step * dtI ,5), round ( step * dtI / fs_to_au,5 ) ]
 
     for j in range( NStates ):
         for k in range( NStates ):
-            outF.append( w[j,k] )
-            outB.append( wp[j,k] )
+            outF.append( wF[j,k] )
+            outB.append( wB[j,k] )
 
     mappingFile_F.write( "\t".join(map("{:1.5f}".format,outF)) + "\n")
     mappingFile_B.write( "\t".join(map("{:1.5f}".format,outB)) + "\n")
@@ -189,7 +231,7 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
     rho = np.zeros((NStates,NStates),dtype=complex)
     for n in range( NStates ):
         for m in range( NStates ):
-            rho[n,m] = 0.25 * ( zF[n] * zF[initstate].conjugate() - gw * (n == initstate) ) * ( zB[m].conjugate() * zB[initstate] - gw * (m == initstate) )
+            rho[n,m] = 0.25 * ( zF[n] * zF[initState].conjugate() - gw * (n == initState) ) * ( zB[m].conjugate() * zB[initState] - gw * (m == initState) )
     """
 
     z0 = np.array( [zF,zB] ) * 1.0
@@ -275,7 +317,7 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
     print (f"Working in traj {n} for NSteps = {NSteps}")
 
     cleanDir(n)
-    densityFile, InitCondsFile, RFile, HelFile, HadFile, coherenceFile, mappingFile_F, mappingFile_B, gamma_mat_File = initFiles(n) # Makes file objects
+    densityFile, InitCondsFile, RFile, HelFile, HadFile, coherenceFile, mappingFile_F, mappingFile_B, gamma_mat_File, ABS_FILE = initFiles(n) # Makes file objects
     hist,rho,Ugam = makeArrays()
 
     R,P = model.initR() # Initialize nuclear DOF
@@ -287,16 +329,17 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
     for step in range(NSteps):
         #print ("Step:", step)
         if ( step % NSkip == 0 ):
-            writeHel(Hel,HelFile)
-            writeHad(Hel,HadFile)
-            #writeDensity(densityFile,coherenceFile,z,step,z0,Ugam)
-            writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
+            #writeHel(Hel,HelFile)
+            #writeHad(Hel,HadFile)
+            writeDensity(densityFile,coherenceFile,z,step,z0,Ugam)
+            #writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
+            writeABS(ABS_FILE,z,step,z0,Ugam)
         R, P, z, Hel = VelVerF(R, P, z, RFile, HelFile)
         Ugam = update_Gamma( Ugam, Hel )
         
         
     
-    closeFiles(densityFile, InitCondsFile, RFile, HelFile, coherenceFile)
+    closeFiles(densityFile, InitCondsFile, RFile, HelFile, coherenceFile, mappingFile_F, mappingFile_B, ABS_FILE)
 
 
 ### Start Main Program ###
