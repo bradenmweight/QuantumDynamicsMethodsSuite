@@ -336,7 +336,7 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
             writeDensity(densityFile,coherenceFile,z,step,z0,Ugam)
             if ( save_kernels == True ):
                 writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
-            if ( save_ABS = True ):
+            if ( save_ABS == True ):
                 writeABS(ABS_FILE,z,step,z0,Ugam)
         R, P, z, Hel = VelVerF(R, P, z, RFile, HelFile)
         Ugam = update_Gamma( Ugam, Hel )
