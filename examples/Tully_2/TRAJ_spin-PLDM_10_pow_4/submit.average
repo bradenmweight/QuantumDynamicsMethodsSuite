@@ -1,0 +1,13 @@
+#!/bin/bash
+#SBATCH -p debug
+#SBATCH -J AVE
+#SBATCH -o output.slurm
+#SBATCH -t 1:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --mem 2GB
+
+python3 average_PLDM.py
+
+
+

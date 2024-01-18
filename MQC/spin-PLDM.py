@@ -1,19 +1,22 @@
 import numpy as np
 import multiprocessing as mp
 import time, os, sys
-import model_coupled_dimer as model
 import numpy.linalg as LA
 import subprocess as sp
 import random
 import scipy as sc
 from numba import jit
 
+import model
+
+
 def getGlobalParams():
-    global dtE, dtI, NSteps, NTraj, NStates, M, windowtype
+    global dtE, dtI, NSteps, ESteps, NTraj, NStates, M, windowtype
     global adjustedgamma, NCPUS, initState, dirName, method
     global fs_to_au, sampling, topDir, NSkip, save_kernels, save_ABS
     dtE = model.parameters.dtE
     dtI = model.parameters.dtI
+    ESteps = int(dtI/dtE)
     NSteps = model.parameters.NSteps
     NTraj = model.parameters.NTraj
     NStates = model.parameters.NStates
@@ -28,8 +31,15 @@ def getGlobalParams():
     #method = model.parameters.method.lower()
     fs_to_au = 41.341 # a.u./fs
     NSkip = model.parameters.NSkip
-    save_kernels = model.parameters.save_kernels
-    save_ABS = model.parameters.save_ABS
+    try:
+        save_kernels = model.parameters.save_kernels
+    except AttributeError:
+        save_kernels = False
+    try:
+        save_ABS = model.parameters.save_ABS
+    except AttributeError:
+        save_ABS = False
+    
 
 def cleanMainDir():
     #if ( os.path.exists(dirName) ):
@@ -68,36 +78,35 @@ def closeFiles(densityFile, InitCondsFile, RFile, HelFile, coherenceFile, mappin
 def makeArrays():
     hist = np.zeros(( NStates ))
     rho = np.zeros(( NStates,NStates ))
-    Ugam = np.identity( NStates )
+    Ugam = np.identity( (NStates), dtype=complex )
     return hist,rho,Ugam
 
+@jit(nopython=True)
 def update_Gamma( Ugam, Hel ):
 
     E,U = np.linalg.eigh(Hel)
-    Udt = U @  np.diag( np.exp( -1j * E * dtI) ) @ U.T # Transform eigenvalues 
+    U   = U + 0.0j # For numba
+    Udt = U @ np.diag( np.exp( -1j * E * dtI) ) @ U.T # Rotate eigenvalue exp matrix
     Ugam = Udt @ Ugam # Paper says U(t_N) * U(t_N-1) * U(t_N-2) * ... 
     
-    ### Potentially faster version with Scipy expm method ###
-    ###### NOT TESTED !!!!! #####
-    #Ugam = sc.linalg.expm( Hel )
-
     return Ugam
 
-def writeDensity(densityFile,coherenceFile,z,i,z0,Ugam):
+@jit(nopython=True)
+def build_kernels( z, z0, Ugam ):
+
+    zF0, zF = z0[0], z[0] # Complex 1D array
+    zB0, zB = z0[1], z[1] # Complex 1D array
+
+    wF   = 0.5 * ( np.outer(zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
+    wB   = 0.5 * ( np.outer(zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
+    wB = np.conjugate( wB.T )
+
+    return wB, wF
+
+def writeDensity(densityFile,coherenceFile,i,wB,wF):
 
     outArrayPOP = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
     outArrayCOH = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
-
-    zF0 = z0[0] # Complex 1D array
-    zB0 = z0[1] # Complex 1D array
-
-    zF = z[0] # Complex 1D array
-    zB = z[1] # Complex 1D array
-
-    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
-    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
-    wB = np.einsum( "ij->ji", wB )
-    wB = np.conjugate( wB )
 
     POP = np.zeros(( NStates )) # Track population given initial state excitation
     A = np.zeros(( NStates, NStates ), dtype=complex) # Track population given initial state excitation
@@ -105,8 +114,8 @@ def writeDensity(densityFile,coherenceFile,z,i,z0,Ugam):
     for j in range( NStates ):
         B = np.zeros(( NStates, NStates ), dtype=complex)
         B[j,j] = 1.0 + 0.0j
-        AwBw   = np.einsum( "ab,bc,cd,de->ae",  A, wB, B, wF )
-        POP[j] = np.real( np.einsum( "aa->",  AwBw ) )
+        AwBw   = A @ wB @ B @ wF
+        POP[j] = np.trace( np.real(AwBw) )
 
         outArrayPOP.append( POP[j] )
 
@@ -116,17 +125,6 @@ def writeDensity(densityFile,coherenceFile,z,i,z0,Ugam):
 def writeABS(ABS_FILE,z,i,z0,Ugam):
 
     outArrayABS = [ round ( i * dtI ,5), round ( i * dtI / fs_to_au,5 ) ]
-
-    zF0 = z0[0] # Complex 1D array
-    zB0 = z0[1] # Complex 1D array
-
-    zF = z[0] # Complex 1D array
-    zB = z[1] # Complex 1D array
-
-    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
-    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
-    wB = np.einsum( "ij->ji", wB )
-    wB = np.conjugate( wB )
 
     # Define dipole operator
     MU_p = np.zeros(( NStates, NStates ))
@@ -146,6 +144,7 @@ def writeABS(ABS_FILE,z,i,z0,Ugam):
     A = np.zeros(( NStates, NStates ), dtype=complex) # Track population given initial state excitation
     A[0,0] = 1.0 + 0.0j
 
+    wB, wF = build_kernels( z, z0, Ugam )
     AwBw   = np.einsum( "ab,bc,cd,de,ef->af",  A, MU_m, wB, MU_p, wF ) # Which is correct ?
     J_ABS = np.einsum( "aa->",  AwBw )
 
@@ -153,18 +152,7 @@ def writeABS(ABS_FILE,z,i,z0,Ugam):
 
     ABS_FILE.write( "\t".join(map("{:1.5f}".format,outArrayABS)) + "\n")
 
-def writeKernel(z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File):
-
-    zF = z[0] * 1.0
-    zB = z[1] * 1.0
-
-    zF0 = z0[0] * 1.0
-    zB0 = z0[1] * 1.0
-
-    wF   = 0.5 * ( np.einsum("j,k->jk", zF[:], np.conjugate(zF0)[:] ) - gw * Ugam[:,:] )
-    wB   = 0.5 * ( np.einsum("j,k->jk", zB[:], np.conjugate(zB0)[:] ) - gw * Ugam[:,:] )
-    wB = np.einsum( "ij->ji", wB )
-    wB = np.conjugate( wB )
+def writeKernel( wB, wF, step, mappingFile_F, mappingFile_B, gamma_mat_File ):
 
     outF = [ round ( step * dtI ,5), round ( step * dtI / fs_to_au,5 ) ]
     outB = [ round ( step * dtI ,5), round ( step * dtI / fs_to_au,5 ) ]
@@ -203,8 +191,8 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
     """
     global gw # Only depends on the number of states. So okay to be global
 
-    Rw = 2*np.sqrt(NStates+1) # Radius of W Sphere, not used
-    gw = (2/NStates) * (np.sqrt(NStates + 1) - 1)
+    Rw  = 2*np.sqrt(NStates+1) # Radius of W Sphere
+    gw = (2/NStates) * (np.sqrt(NStates + 1) - 1) # ZPE of the W-sphere
 
     # Notes:
     # Z_mu = r_mu * Exp[i phi_mu] # Cartesian mapping variables: Z = X + i P
@@ -212,15 +200,15 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
 
     # Initialize mapping radii
     rF = np.ones(( NStates )) * np.sqrt(gw)
-    randStateF = int(sys.argv[1])
-    rF[randStateF] = np.sqrt( 2 + gw )
+    initStateF = int(sys.argv[1])
+    rF[initStateF] = np.sqrt( 2 + gw )
 
     rB = np.ones(( NStates )) * np.sqrt(gw)
-    randStateB = int(sys.argv[2])
-    rB[randStateB] = np.sqrt( 2 + gw )
+    initStateB = int(sys.argv[2])
+    rB[initStateB] = np.sqrt( 2 + gw )
 
-    zF = np.zeros(( NStates ),dtype=complex)
-    zB = np.zeros(( NStates ),dtype=complex)
+    zF = np.zeros( (NStates), dtype=complex)
+    zB = np.zeros( (NStates), dtype=complex)
 
     ### FOCUSED spin-PLDM INITIALIZATION ###
     for i in range(NStates):
@@ -228,50 +216,125 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
         zF[i] = rF[i] * ( np.cos( phiF ) + 1j * np.sin( phiF ) )
         phiB = random.random() * 2 * np.pi # Azimuthal Angle -- Always Random
         zB[i] = rB[i] * ( np.cos( phiB ) + 1j * np.sin( phiB ) )
-  
+
     """
-    rho = np.zeros((NStates,NStates),dtype=complex)
-    for n in range( NStates ):
-        for m in range( NStates ):
-            rho[n,m] = 0.25 * ( zF[n] * zF[initState].conjugate() - gw * (n == initState) ) * ( zB[m].conjugate() * zB[initState] - gw * (m == initState) )
+    # Test Initial Population
+    A = np.zeros( (NStates,NStates), dtype=complex )
+    A[initState,initState] = 1.0 + 0.0j
+    wB, wF = build_kernels( np.array( [zF,zB] ), np.array( [zF,zB] ), np.identity(NStates) )
+    print( np.real(np.trace( A @ wB @ A @ wB )) )
+    exit()
     """
 
-    z0 = np.array( [zF,zB] ) * 1.0
+    return np.array( [zF,zB] ), np.array( [zF,zB] )
 
-    return np.array( [zF,zB] ), z0
-
+@jit(nopython=True)
 def propagateMapVars(z, VMat):
     """
     Updates mapping variables
-    """
-        
-    Zreal = np.real(z)
-    Zimag = np.imag(z)
-
-    # Propagate Imaginary first by dt/2
-    Zimag -= 0.5 * VMat @ Zreal * dtE
-
-    # Propagate Real by full dt
-    Zreal += VMat @ Zimag * dtE
-    
-    # Propagate Imaginary final by dt/2
-    Zimag -= 0.5 * VMat @ Zreal * dtE
-
-    return  Zreal + 1j*Zimag
-
-@jit(nopython=True)
-def Force(dHel, R, z, dHel0):
-    """
-    F = F0 + Fm
-    F0 = -GRAD V_0 (State-Independent)
-    Fm = -GRAD V_m (State-Dependent and Traceless)
-    V_m = 0.5 * SUM_(lam, u) <lam|V|u> z*_lam z'_u
     """
 
     zF = z[0]
     zB = z[1]
 
-    action = 0.5 * np.real( ( np.outer( zF.conjugate(), zF ) + np.outer( zB.conjugate(), zB ) - 2 * gw * np.identity(NStates) ) )
+    REzF = zF.real
+    IMzF = zF.imag
+
+    REzB = zB.real
+    IMzB = zB.imag
+
+    for t in range( ESteps ): # Full-step Electronic Mapping
+
+        # Propagate Imaginary first by dt/2
+        IMzF -= 0.5 * VMat @ REzF * dtE
+        IMzB -= 0.5 * VMat @ REzB * dtE
+
+        # Propagate Real by full dt
+        REzF += VMat @ IMzF * dtE
+        REzB += VMat @ IMzB * dtE
+        
+        # Propagate Imaginary final by dt/2
+        IMzF -= 0.5 * VMat @ REzF * dtE
+        IMzB -= 0.5 * VMat @ REzB * dtE
+
+    zF = REzF + 1j*IMzF
+    zB = REzB + 1j*IMzB
+    z  = np.array([zF,zB])
+
+    return z
+
+
+#@jit(nopython=True)
+def Force(dHel, R, z, z0, Ugam, wB, wF, dHel0):
+    """
+    F   = F0 + Fm
+    F0  = -GRAD V_0 (State-Independent)
+    Fm  = -GRAD V_m (State-Dependent and Traceless)
+    V_m = 0.5 * SUM_(lam, u) <lam|V|u> z*_lam z'_u - gw * U[:,:]
+    """
+
+    action4 = 0.50 * np.real( wB + wF )
+
+    F  = np.zeros( (len(R)) )
+    F -= dHel0
+    F -= np.einsum( "jkR,jk->R", dHel[:,:,:], action4[:,:] )
+    return F
+
+@jit(nopython=True)
+def Force_TESTING(dHel, R, z, z0, Ugam, wB, wF, dHel0):
+    """
+    F = F0 + Fm
+    F0 = -GRAD V_0 (State-Independent)
+    Fm = -GRAD V_m (State-Dependent and Traceless)
+    V_m = 0.5 * SUM_(lam, u) <lam|V|u> z*_lam z'_u - gw
+    """
+
+    zF0, zF = z0[0], z[0] # Complex 1D array
+    zB0, zB = z0[1], z[1] # Complex 1D array
+
+    # Should we include the time-dependent ZPE matrix here... ?
+    # Should be z(t)*z(0) or z(t)*z(t) ?
+    # IMPORTANT: action0 is the most stable. Tr[action0] = 1.0 for all times. All others do not.
+    ##action0 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * np.identity(NStates) )
+    ##action1 = 0.25 * np.real( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB )  - 2 * gw * np.identity(NStates) )
+    ##action2 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * Ugam )
+    ##action3 = 0.25 * np.real( (np.outer(zF, zF0.conjugate()) - gw * Ugam.conjugate()) + np.conjugate(np.outer(zB, zB0.conjugate()) - gw * Ugam.conjugate()).T )
+    action4 = 0.50 * np.real( wB + wF ) # Same as 3
+    ##action5 = 0.25 * np.real( ( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB ) ) )
+    
+    
+    #print()
+    #print( "0", np.sum(np.diagonal(action0)) )
+    #print( "1", np.sum(np.diagonal(action1)) )
+    #print( "2", np.sum(np.diagonal(action2)) )
+    #print( "3", np.sum(np.diagonal(action3)) )
+    #print( "4", np.sum(np.diagonal(action4)) )
+    #print( "5", np.sum(np.diagonal(action5)) )
+    #print( Ugam )
+
+    F = np.zeros( (len(R)) )
+    F -= dHel0
+    for i in range(NStates):
+        F -= dHel[i,i,:] * action4[i,i]
+        for j in range(i+1,NStates): # Double counting off-diagonal to save time
+            F -= 2 * dHel[i,j,:] * action4[i,j]
+    return F
+
+@jit(nopython=True)
+def Force_noz0_noUgam(dHel, R, z, z0, Ugam, dHel0):
+    """
+    F = F0 + Fm
+    F0 = -GRAD V_0 (State-Independent)
+    Fm = -GRAD V_m (State-Dependent and Traceless)
+    V_m = 0.5 * SUM_(lam, u) <lam|V|u> z*_lam z'_u - gw
+    """
+
+    zF = z[0]
+    zB = z[1]
+
+    # Should we include the time-dependent ZPE matrix here... ?
+    # Should be z(t)*z(0) or z(t)*z(t) ?
+    action = 0.5 * np.real( ( np.outer( zF.conjugate(), zF ) + np.outer( zB.conjugate(), zB ) - gw * np.identity(NStates) ) )
 
     F = np.zeros((len(R)))
     F -= dHel0
@@ -281,38 +344,24 @@ def Force(dHel, R, z, dHel0):
             F -= 2 * 0.5 * dHel[i,j,:] * action[i,j]
     return F
 
-def VelVerF(R, P, z, RFile, HelFile): # Ionic position, ionic momentum, etc.
-    
-    v = P/M
-    Hel = model.Hel(R) # Electronic Structure
+def do_Electronic_Structure( R ):
+    Hel = model.Hel(R)
     dHel = model.dHel(R)
     dHel0 = model.dHel0(R)
-    EStep = int(dtI/dtE)
+    return Hel, dHel, dHel0
+
+def VelVerF( R, P, z, z0, Ugam, wB, wF, F1, RFile, HelFile ): # Ionic position, ionic momentum, etc.
     
-    for t in range( int(EStep/2) ): # Half-step Mapping
-        z[0] = propagateMapVars(z[0], Hel) * 1
-        z[1] = propagateMapVars(z[1], Hel) * 1
-
+    R += P/M * dtI + 0.5000 * dtI * F1 / M # Full Step Nuclear Position
     
-    F1 = Force(dHel, R, z, dHel0)
-
-    v += 0.5000 * F1 * dtI / M # Half-step velocity
-
-    R += v * dtI # Full Step Position
+    Hel, dHel, dHel0 = do_Electronic_Structure( R )
+    F2 = Force(dHel, R, z, z0, Ugam, wB, wF, dHel0)
     
-    dHel = model.dHel(R)
-    dHel0 = model.dHel0(R)
-    F2 = Force(dHel, R, z, dHel0)
-    
-    v += 0.5000 * F2 * dtI / M # Half-step Velocity
+    P += 0.5000 * dtI * (F1 + F2) # Half-step Nuclear Velocity
 
-    Hel = model.Hel(R) # Electronic Structure
+    Hel, dHel, dHel0 = do_Electronic_Structure( R )
 
-    for t in range( int(EStep/2) ): # Half-step Mappings
-        z[0] = propagateMapVars(z[0], Hel) * 1
-        z[1] = propagateMapVars(z[1], Hel) * 1
-
-    return R, v*M, z, Hel
+    return R, P, z, Hel, F2
 
 def RunIterations(n): # This is parallelized already. "Main" for each trajectory.
 
@@ -326,19 +375,20 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
 
     z,z0 = initMapping(InitCondsFile)
 
-    Hel = model.Hel(R)
-    dHij = model.dHel(R)
+    Hel, dHel, dHel0 = do_Electronic_Structure( R )
+    F1 = Force(dHel, R, z, z0, Ugam, wB, wF, dHel0)
     for step in range(NSteps):
         #print ("Step:", step)
+        wB, wF = build_kernels( z, z0, Ugam )
         if ( step % NSkip == 0 ):
             #writeHel(Hel,HelFile)
             #writeHad(Hel,HadFile)
-            writeDensity(densityFile,coherenceFile,z,step,z0,Ugam)
-            if ( save_kernels == True ):
-                writeKernel( z, z0, mappingFile_F, mappingFile_B, step, Ugam, gamma_mat_File )
-            if ( save_ABS == True ):
-                writeABS(ABS_FILE,z,step,z0,Ugam)
-        R, P, z, Hel = VelVerF(R, P, z, RFile, HelFile)
+            writeDensity(densityFile,coherenceFile,step,wB,wF)
+            if ( save_kernels == True ): writeKernel( wB, wF, step, mappingFile_F, mappingFile_B, gamma_mat_File )
+            if ( save_ABS == True ): writeABS(ABS_FILE,z,step,z0,Ugam)
+        R, P, z, Hel, F1 = VelVerF(R, P, z, z0, Ugam, wB, wF, F1, RFile, HelFile)
+        z = propagateMapVars(z, Hel)
+
         Ugam = update_Gamma( Ugam, Hel )
         
         
@@ -358,6 +408,7 @@ if ( __name__ == "__main__"  ):
     runList = np.arange(NTraj)
     with mp.Pool(processes=NCPUS) as pool:
         pool.map(RunIterations,runList)
+    #RunIterations(0)
 
     stop = time.time()
     print (f"Total Computation Time (Hours): {(stop - start) / 3600}")
