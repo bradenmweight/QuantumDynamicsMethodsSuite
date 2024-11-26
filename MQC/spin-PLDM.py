@@ -31,6 +31,12 @@ def getGlobalParams():
     #method = model.parameters.method.lower()
     fs_to_au = 41.341 # a.u./fs
     NSkip = model.parameters.NSkip
+
+    global initStateF, initStateB
+    initStateF = int(sys.argv[1])
+    initStateB = int(sys.argv[2])
+
+
     try:
         save_kernels = model.parameters.save_kernels
     except AttributeError:
@@ -200,11 +206,9 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
 
     # Initialize mapping radii
     rF = np.ones(( NStates )) * np.sqrt(gw)
-    initStateF = int(sys.argv[1])
     rF[initStateF] = np.sqrt( 2 + gw )
 
     rB = np.ones(( NStates )) * np.sqrt(gw)
-    initStateB = int(sys.argv[2])
     rB[initStateB] = np.sqrt( 2 + gw )
 
     zF = np.zeros( (NStates), dtype=complex)
@@ -228,7 +232,7 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
 
     return np.array( [zF,zB] ), np.array( [zF,zB] )
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def propagateMapVars(z, VMat):
     """
     Updates mapping variables
@@ -280,7 +284,7 @@ def Force(dHel, R, z, z0, Ugam, wB, wF, dHel0):
     F -= np.einsum( "jkR,jk->R", dHel[:,:,:], action4[:,:] )
     return F
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def Force_TESTING(dHel, R, z, z0, Ugam, wB, wF, dHel0):
     """
     F = F0 + Fm
@@ -295,22 +299,22 @@ def Force_TESTING(dHel, R, z, z0, Ugam, wB, wF, dHel0):
     # Should we include the time-dependent ZPE matrix here... ?
     # Should be z(t)*z(0) or z(t)*z(t) ?
     # IMPORTANT: action0 is the most stable. Tr[action0] = 1.0 for all times. All others do not.
-    ##action0 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * np.identity(NStates) )
-    ##action1 = 0.25 * np.real( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB )  - 2 * gw * np.identity(NStates) )
-    ##action2 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * Ugam )
-    ##action3 = 0.25 * np.real( (np.outer(zF, zF0.conjugate()) - gw * Ugam.conjugate()) + np.conjugate(np.outer(zB, zB0.conjugate()) - gw * Ugam.conjugate()).T )
+    action0 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * np.identity(NStates) )
+    action1 = 0.25 * np.real( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB )  - 2 * gw * np.identity(NStates) )
+    action2 = 0.25 * np.real( np.outer( zF, zF.conjugate()  )  + np.outer( zB.conjugate(),  zB )  - 2 * gw * Ugam )
+    action3 = 0.25 * np.real( (np.outer(zF, zF0.conjugate()) - gw * Ugam.conjugate()) + np.conjugate(np.outer(zB, zB0.conjugate()) - gw * Ugam.conjugate()).T )
     action4 = 0.50 * np.real( wB + wF ) # Same as 3
-    ##action5 = 0.25 * np.real( ( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB ) ) )
+    action5 = 0.25 * np.real( ( np.outer( zF, zF0.conjugate() )  + np.outer( zB0.conjugate(), zB ) ) )
+    action6 = 0.25 * np.real( ( np.outer( zF, zF.conjugate() )  + np.outer( zB, zB.conjugate() ) ) )
     
-    
-    #print()
-    #print( "0", np.sum(np.diagonal(action0)) )
-    #print( "1", np.sum(np.diagonal(action1)) )
-    #print( "2", np.sum(np.diagonal(action2)) )
-    #print( "3", np.sum(np.diagonal(action3)) )
-    #print( "4", np.sum(np.diagonal(action4)) )
-    #print( "5", np.sum(np.diagonal(action5)) )
-    #print( Ugam )
+    print()
+    print( "0", np.sum(np.diagonal(action0)) )
+    print( "1", np.sum(np.diagonal(action1)) )
+    print( "2", np.sum(np.diagonal(action2)) )
+    print( "3", np.sum(np.diagonal(action3)) )
+    print( "4", np.sum(np.diagonal(action4)) )
+    print( "5", np.sum(np.diagonal(action5)) )
+    print( "6", np.sum(np.diagonal(action6)) )
 
     F = np.zeros( (len(R)) )
     F -= dHel0
@@ -320,7 +324,7 @@ def Force_TESTING(dHel, R, z, z0, Ugam, wB, wF, dHel0):
             F -= 2 * dHel[i,j,:] * action4[i,j]
     return F
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def Force_noz0_noUgam(dHel, R, z, z0, Ugam, dHel0):
     """
     F = F0 + Fm
@@ -355,7 +359,7 @@ def VelVerF( R, P, z, z0, Ugam, wB, wF, F1, RFile, HelFile ): # Ionic position, 
     R += P/M * dtI + 0.5000 * dtI * F1 / M # Full Step Nuclear Position
     
     Hel, dHel, dHel0 = do_Electronic_Structure( R )
-    F2 = Force(dHel, R, z, z0, Ugam, wB, wF, dHel0)
+    F2 = Force_TESTING(dHel, R, z, z0, Ugam, wB, wF, dHel0)
     
     P += 0.5000 * dtI * (F1 + F2) # Half-step Nuclear Velocity
 
@@ -374,6 +378,7 @@ def RunIterations(n): # This is parallelized already. "Main" for each trajectory
     R,P = model.initR() # Initialize nuclear DOF
 
     z,z0 = initMapping(InitCondsFile)
+    wB, wF = build_kernels( z, z0, Ugam )
 
     Hel, dHel, dHel0 = do_Electronic_Structure( R )
     F1 = Force(dHel, R, z, z0, Ugam, wB, wF, dHel0)

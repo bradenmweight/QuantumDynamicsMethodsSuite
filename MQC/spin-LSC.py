@@ -87,11 +87,7 @@ def initMapping(InitCondsFile):# Initialization of the mapping Variables
     """
     global gw # Only depends on the number of states. So okay to be global
 
-    Rw = 2*np.sqrt(NStates+1) # Radius of W Sphere
     gw = (2/NStates) * (np.sqrt(NStates + 1) - 1)
-
-    # Z_mu = r_mu * Exp[i phi_mu] # Cartesian mapping variables: Z = X + i P
-    # r_mu = np.sqrt( 2*( mu == lambda) + gw ) # Radius of mapping var when focused to lambda
 
     # Initialize mapping radii
     r = np.ones(( NStates )) * np.sqrt(gw)
